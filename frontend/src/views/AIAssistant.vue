@@ -66,38 +66,20 @@
                   
                   <!-- LLM分析结果 -->
                   <div class="result-section llm-analysis" v-if="message.llm_analysis">
-                    <h4>AI深度分析</h4>
+                    <h4>{{ language === 'zh' ? 'AI深度分析' : 'AI Deep Analysis' }}</h4>
                     <div class="llm-content" v-html="formatContent(message.llm_analysis)"></div>
                   </div>
                   
                   <!-- 本次回答采纳的Main Activity下载 -->
                   <div class="result-section" v-if="message.content.referencedActivities && message.content.referencedActivities.length">
-                    <h4>本次回答采纳的案例</h4>
+                    <h4>{{ language === 'zh' ? '相关案例' : 'Related Cases' }}</h4>
                     <div class="cases-container">
                       <div v-for="(activity, idx) in message.content.referencedActivities" :key="idx" class="case-item">
                         <span class="case-name">{{ activity }}</span>
                         <button class="download-btn" @click="downloadActivityExcel(activity)">
-                          <span class="download-icon">📥</span> 下载
+                          <span class="download-icon">📥</span> {{ language === 'zh' ? '下载' : 'Download' }}
                         </button>
                       </div>
-                    </div>
-                  </div>
-                  
-                  <!-- 相似历史案例 -->
-                  <div class="result-section" v-if="message.content.similar_cases.length">
-                    <h4>相似历史案例</h4>
-                    <div class="cases-container">
-                      <div v-for="(item, idx) in message.content.similar_cases" :key="idx" class="case-item">
-                        <span class="case-name">{{ item.project_name }} ({{ item.package_type }})</span>
-                        <button class="download-btn" @click="downloadActivityExcel(item.project_name)">
-                          <span class="download-icon">📥</span> 下载
-                        </button>
-                      </div>
-                    </div>
-                    <div class="download-all-container">
-                      <button class="download-all-btn" @click="downloadAllActivitiesExcel">
-                        <span class="download-icon">📥</span> 下载所有案例
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -144,13 +126,26 @@ export default {
       messageInput: '',
       aiMessages: [],
       isLoading: false,
-      language: 'zh',
-      suggestions: [
-        'How to reduce warpage in FCBGA packages?',
-        'What are the best underfill materials for WLCSP?',
-        'How to improve delamination resistance in SiP packages?',
-        'What are the key parameters for thermal compression bonding?'
-      ]
+      language: 'zh'
+    }
+  },
+  computed: {
+    suggestions() {
+      if (this.language === 'zh') {
+        return [
+          '如何解决Post ELP Blister问题？',
+          '干法除胶外包有什么优缺点？',
+          '干法+湿法组合除胶工艺的效果如何？',
+          '如何优化半导体封装中的除胶工艺？'
+        ]
+      } else {
+        return [
+          'How to solve Post ELP Blister issues?',
+          'What are the pros and cons of Dry Desmear Outsourcing?',
+          'What is the effect of Dry + Wet Desmear pathfinding?',
+          'How to optimize desmear process in semiconductor packaging?'
+        ]
+      }
     }
   },
   mounted() {
@@ -159,10 +154,14 @@ export default {
   },
   methods: {
     addWelcomeMessage() {
+      const welcomeContent = this.language === 'zh' 
+        ? '你好！我是你的半导体封装专家。我可以帮助你解决与封装类型、材料、失效模式和DOE实验设计相关的问题，特别是关于Post ELP Blister、干法除胶外包和干法+湿法组合除胶工艺等方面的问题。今天我能为你提供什么帮助？'
+        : 'Hello! I am your semiconductor packaging expert. I can help you with issues related to packaging types, materials, failure modes, and DOE experimental design, especially regarding Post ELP Blister, Dry Desmear Outsourcing, and Dry + Wet Desmear pathfinding. How can I assist you today?'
+      
       const welcomeMessage = {
         type: 'ai',
         sender: 'AI Assistant',
-        content: 'Hello! I am your semiconductor packaging expert. I can help you with issues related to packaging types, materials, failure modes, and DOE experimental design. How can I assist you today?',
+        content: welcomeContent,
         contentType: 'text',
         timestamp: new Date().toLocaleTimeString()
       }
@@ -170,6 +169,9 @@ export default {
     },
     toggleLanguage() {
       this.language = this.language === 'zh' ? 'en' : 'zh'
+      // 清空消息并重新添加欢迎消息
+      this.aiMessages = []
+      this.addWelcomeMessage()
     },
     async sendMessage() {
       if (!this.messageInput.trim() || this.isLoading) return
@@ -254,26 +256,15 @@ export default {
           } else {
             clearInterval(typingInterval)
             
-            // 解析LLM分析结果，提取本次回答采纳的Main Activity
-            let referencedActivities = []
-            if (data.llm_analysis) {
-              // 匹配中文格式
-              const zhMatch = data.llm_analysis.match(/## \[本次回答采纳的Main Activity\]\n- (.+?)(?=\n##|$)/s)
-              if (zhMatch) {
-                referencedActivities = zhMatch[1].trim().split('\n- ').filter(item => item)
-              }
-              // 匹配英文格式
-              const enMatch = data.llm_analysis.match(/## \[Main Activity References\]\n- (.+?)(?=\n##|$)/s)
-              if (enMatch) {
-                referencedActivities = enMatch[1].trim().split('\n- ').filter(item => item)
-              }
-            }
+            // 从后端获取本次回答采纳的Main Activity
+            let referencedActivities = data.referenced_activities || []
             
             // 从相似案例中筛选出被引用的案例
             let filteredSimilarCases = []
             if (referencedActivities.length > 0 && data.rule_based.similar_cases) {
+              // 筛选出与本次回答相关但不在"本次回答采纳的案例"中的案例
               filteredSimilarCases = data.rule_based.similar_cases.filter(caseItem => 
-                referencedActivities.includes(caseItem.project_name)
+                !referencedActivities.includes(caseItem.project_name)
               )
             } else {
               // 如果没有被引用的案例，不显示任何相似案例

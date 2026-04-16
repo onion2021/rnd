@@ -530,6 +530,28 @@ def generate_ai_response(analysis, similar_cases, language='zh'):
     
     return response
 
+def extract_referenced_activities(llm_analysis):
+    """从LLM分析结果中提取本次回答采纳的Main Activity"""
+    referenced_activities = []
+    if llm_analysis:
+        # 匹配中文格式（支持不同换行符格式和空格）
+        import re
+        zhMatch = re.search(r'##\s*\[本次回答采纳的Main Activity\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
+        if zhMatch:
+            referenced_activities = zhMatch.group(1).strip().split(re.compile(r'\s*[\r\n]+\s*-\s*'))
+            referenced_activities = [item for item in referenced_activities if item]
+        # 匹配英文格式（支持不同换行符格式和空格）
+        enMatch = re.search(r'##\s*\[Main Activity References\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
+        if enMatch:
+            referenced_activities = enMatch.group(1).strip().split(re.compile(r'\s*[\r\n]+\s*-\s*'))
+            referenced_activities = [item for item in referenced_activities if item]
+        # 如果没有匹配到，尝试直接从文本中提取活动名称
+        if not referenced_activities:
+            activityRegex = re.compile(r'-\s*(Post ELP Blister Activity|Dry Desmear Outsourcing|Dry \+ Wet Desmear pathfinding)')
+            matches = activityRegex.findall(llm_analysis)
+            referenced_activities = matches
+    return referenced_activities
+
 @api.route('/ai/query', methods=['POST'])
 def ai_query():
     """AI助手查询接口"""
@@ -572,6 +594,9 @@ def ai_query():
     # 调用LLM进行深度分析
     llm_response = call_llm(query, context, language)
     
+    # 提取本次回答采纳的Main Activity
+    referenced_activities = extract_referenced_activities(llm_response)
+    
     # 构建响应
     response = {
         'rule_based': {
@@ -582,7 +607,8 @@ def ai_query():
             'theoretical_suggestions': []
         },
         'llm_analysis': llm_response,
-        'similar_cases': []
+        'similar_cases': [],
+        'referenced_activities': referenced_activities
     }
     
     return jsonify(response)
