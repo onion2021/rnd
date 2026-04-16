@@ -1,0 +1,107 @@
+:root {
+  /* 颜色变量 */
+  --primary-color: #00d4ff;
+  --primary-dark: #0099cc;
+  --primary-light: #4dd2ff;
+  --secondary-color: #00ff80;
+  --secondary-dark: #00cc66;
+  --secondary-light: #4dffb3;
+  --background-primary: #1a1a2e;
+  --background-secondary: #16213e;
+  --background-tertiary: #2a2a4e;
+  --surface-primary: rgba(255, 255, 255, 0.03);
+  --surface-secondary: rgba(255, 255, 255, 0.05);
+  --surface-tertiary: rgba(255, 255, 255, 0.1);
+  --text-primary: #e0e0e0;
+  --text-secondary: #b0b0b0;
+  --text-tertiary: #888888;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --border-primary: rgba(0, 212, 255, 0.3);
+  --border-secondary: rgba(0, 255, 128, 0.3);
+  
+  /* 间距变量 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+  
+  /* 圆角变量 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-xxl: 24px;
+  --radius-full: 9999px;
+  
+  /* 阴影变量 */
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 12px 24px rgba(0, 212, 255, 0.3);
+  
+  /* 字体变量 */
+  --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-xxl: 1.5rem;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+  
+  /* 过渡变量 */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.3s ease;
+  --transition-slow: 0.5s ease;
+  
+  /* 布局变量 */
+  --sidebar-width: 250px;
+  --header-height: 64px;
+  --footer-height: 48px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family);
+  background: linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+
+input, textarea, select {
+  font-family: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.5);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.8);
+}
