@@ -3,8 +3,7 @@ import os
 import json
 import re
 import requests
-import psycopg2
-from psycopg2 import sql
+import sqlite3
 from dotenv import load_dotenv
 from flask import Blueprint, request, jsonify
 
@@ -16,12 +15,8 @@ api = Blueprint('api', __name__)
 CSV_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'mock_project_data.csv')
 STATUS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project_status.json')
 
-# 数据库连接参数
-DB_HOST = os.getenv('DB_HOST', 'localhost')
-DB_PORT = os.getenv('DB_PORT', '5432')
-DB_NAME = os.getenv('DB_NAME', 'rnd')
-DB_USER = os.getenv('DB_USER', 'postgres')
-DB_PASSWORD = os.getenv('DB_PASSWORD', '1233')
+# SQLite数据库文件路径
+DB_FILE = os.path.join(os.path.dirname(__file__), 'pdm.db')
 
 # LLM配置
 LLM_BASE_URL = os.getenv('LLM_BASE_URL')
@@ -30,13 +25,8 @@ LLM_MODEL = os.getenv('LLM_MODEL')
 
 # 数据库连接函数
 def get_db_connection():
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD
-    )
+    # check_same_thread=False 允许 Flask 在多线程环境下复用连接创建
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     return conn
 
 def read_data():
@@ -82,14 +72,16 @@ def save_status_map(status_map):
 
 def call_llm(prompt, context, language='zh'):
     """调用LLM进行分析"""
-    if not all([LLM_BASE_URL, LLM_API_KEY, LLM_MODEL]):
-        return "LLM配置不完整，无法进行深度分析"
+    # 某些本地模型兼容 OpenAI 格式但不要求鉴权，此时 LLM_API_KEY 可能为空
+    if not all([LLM_BASE_URL, LLM_MODEL]):
+        return "LLM配置不完整，缺少 LLM_BASE_URL 或 LLM_MODEL，无法进行深度分析"
     
     try:
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {LLM_API_KEY}"
         }
+        if LLM_API_KEY:
+            headers["Authorization"] = f"Bearer {LLM_API_KEY}"
         
         # 根据语言设置系统提示词
         if language == 'zh':
@@ -538,13 +530,14 @@ def extract_referenced_activities(llm_analysis):
         import re
         zhMatch = re.search(r'##\s*\[本次回答采纳的Main Activity\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
         if zhMatch:
-            referenced_activities = zhMatch.group(1).strip().split(re.compile(r'\s*[\r\n]+\s*-\s*'))
-            referenced_activities = [item for item in referenced_activities if item]
+            # `str.split()` 不能直接接收 `re.Pattern`，这里改为 `re.split`
+            referenced_activities = re.split(r'\s*[\r\n]+\s*-\s*', zhMatch.group(1).strip())
+            referenced_activities = [item for item in referenced_activities if item and item.strip()]
         # 匹配英文格式（支持不同换行符格式和空格）
         enMatch = re.search(r'##\s*\[Main Activity References\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
         if enMatch:
-            referenced_activities = enMatch.group(1).strip().split(re.compile(r'\s*[\r\n]+\s*-\s*'))
-            referenced_activities = [item for item in referenced_activities if item]
+            referenced_activities = re.split(r'\s*[\r\n]+\s*-\s*', enMatch.group(1).strip())
+            referenced_activities = [item for item in referenced_activities if item and item.strip()]
         # 如果没有匹配到，尝试直接从文本中提取活动名称
         if not referenced_activities:
             activityRegex = re.compile(r'-\s*(Post ELP Blister Activity|Dry Desmear Outsourcing|Dry \+ Wet Desmear pathfinding)')
@@ -650,7 +643,7 @@ def get_activity(id):
         cursor = conn.cursor()
         
         # 获取主要活动
-        cursor.execute("SELECT id, name, background, summary, created_at FROM main_activities WHERE id = %s", (id,))
+        cursor.execute("SELECT id, name, background, summary, created_at FROM main_activities WHERE id = ?", (id,))
         activity = cursor.fetchone()
         
         if not activity:
@@ -659,7 +652,7 @@ def get_activity(id):
             return jsonify({'error': 'Activity not found'}), 404
         
         # 获取子活动
-        cursor.execute("SELECT id, order_num, doe_number, background, activity_name, result, created_at FROM sub_activities WHERE main_activity_id = %s ORDER BY order_num", (id,))
+        cursor.execute("SELECT id, order_num, doe_number, background, activity_name, result, created_at FROM sub_activities WHERE main_activity_id = ? ORDER BY order_num", (id,))
         sub_activities = cursor.fetchall()
         
         sub_result = []
@@ -700,14 +693,14 @@ def create_activity():
         cursor = conn.cursor()
         
         cursor.execute(
-            """INSERT INTO main_activities (name, background, summary) VALUES (%s, %s, %s) RETURNING id""",
+            """INSERT INTO main_activities (name, background, summary) VALUES (?, ?, ?)""",
             (data.get('name'), data.get('background'), data.get('summary'))
         )
-        activity_id = cursor.fetchone()[0]
+        activity_id = cursor.lastrowid
         conn.commit()
         
         # 获取创建的活动
-        cursor.execute("SELECT id, name, background, summary, created_at FROM main_activities WHERE id = %s", (activity_id,))
+        cursor.execute("SELECT id, name, background, summary, created_at FROM main_activities WHERE id = ?", (activity_id,))
         activity = cursor.fetchone()
         
         result = {
@@ -735,21 +728,21 @@ def create_subactivity(activity_id):
         cursor = conn.cursor()
         
         # 检查主要活动是否存在
-        cursor.execute("SELECT id FROM main_activities WHERE id = %s", (activity_id,))
+        cursor.execute("SELECT id FROM main_activities WHERE id = ?", (activity_id,))
         if not cursor.fetchone():
             cursor.close()
             conn.close()
             return jsonify({'error': 'Main activity not found'}), 404
         
         cursor.execute(
-            """INSERT INTO sub_activities (main_activity_id, order_num, doe_number, background, activity_name, result) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+            """INSERT INTO sub_activities (main_activity_id, order_num, doe_number, background, activity_name, result) VALUES (?, ?, ?, ?, ?, ?)""",
             (activity_id, data.get('order_num'), data.get('doe_number'), data.get('background'), data.get('activity_name'), data.get('result'))
         )
-        subactivity_id = cursor.fetchone()[0]
+        subactivity_id = cursor.lastrowid
         conn.commit()
         
         # 获取创建的子活动
-        cursor.execute("SELECT id, main_activity_id, order_num, doe_number, background, activity_name, result, created_at FROM sub_activities WHERE id = %s", (subactivity_id,))
+        cursor.execute("SELECT id, main_activity_id, order_num, doe_number, background, activity_name, result, created_at FROM sub_activities WHERE id = ?", (subactivity_id,))
         subactivity = cursor.fetchone()
         
         result = {
@@ -778,7 +771,7 @@ def download_activity_excel(activity_id):
         cursor = conn.cursor()
         
         # 获取主要活动
-        cursor.execute("SELECT id, name, background, summary FROM main_activities WHERE id = %s", (activity_id,))
+        cursor.execute("SELECT id, name, background, summary FROM main_activities WHERE id = ?", (activity_id,))
         activity = cursor.fetchone()
         
         if not activity:

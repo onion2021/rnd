@@ -13,3 +13,5 @@ venv/
 .env
 
 node_modules/
+
+.specstory/
