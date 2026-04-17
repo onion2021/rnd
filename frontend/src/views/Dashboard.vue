@@ -214,6 +214,8 @@
 </template>
 
 <script>
+import { apiUrl } from '../api'
+
 export default {
   name: 'Dashboard',
   data() {
@@ -274,7 +276,7 @@ export default {
   methods: {
     async fetchProjects() {
       try {
-        const response = await fetch('http://localhost:5000/api/projects')
+        const response = await fetch(apiUrl('/api/projects'))
         this.projects = await response.json()
       } catch (error) {
         console.error('Error fetching projects:', error)
@@ -282,7 +284,7 @@ export default {
     },
     async createProject() {
       try {
-        const response = await fetch('http://localhost:5000/api/projects', {
+        const response = await fetch(apiUrl('/api/projects'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -299,7 +301,7 @@ export default {
     },
     async updateStatus() {
       try {
-        await fetch(`http://localhost:5000/api/projects/${this.statusUpdate.index}/status`, {
+        await fetch(apiUrl(`/api/projects/${this.statusUpdate.index}/status`), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json'

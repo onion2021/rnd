@@ -56,6 +56,8 @@
 </template>
 
 <script>
+import { apiUrl } from '../api'
+
 export default {
   name: 'ActivityDetail',
   data() {
@@ -74,7 +76,7 @@ export default {
       this.error = null
       try {
         const id = this.$route.params.id
-        const response = await fetch(`http://localhost:5000/api/activities/${id}`)
+        const response = await fetch(apiUrl(`/api/activities/${id}`))
         if (!response.ok) {
           throw new Error('Failed to fetch activity detail')
         }

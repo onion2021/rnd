@@ -26,6 +26,8 @@
 </template>
 
 <script>
+import { apiUrl } from '../api'
+
 export default {
   name: 'FlowList',
   data() {
@@ -43,7 +45,7 @@ export default {
       this.loading = true
       this.error = null
       try {
-        const response = await fetch('http://localhost:5000/api/activities')
+        const response = await fetch(apiUrl('/api/activities'))
         if (!response.ok) {
           throw new Error('Failed to fetch flows')
         }

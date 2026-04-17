@@ -119,6 +119,8 @@
 </template>
 
 <script>
+import { apiUrl } from '../api'
+
 export default {
   name: 'AIAssistant',
   data() {
@@ -222,7 +224,7 @@ export default {
     },
     async simulateStreamingResponse(query, messageIndex) {
       // 首先发送请求获取完整响应
-      const response = await fetch('http://localhost:5000/api/ai/query', {
+      const response = await fetch(apiUrl('/api/ai/query'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -317,14 +319,14 @@ export default {
     async downloadActivityExcel(projectName) {
       try {
         // 获取活动列表
-        const response = await fetch('http://localhost:5000/api/activities')
+        const response = await fetch(apiUrl('/api/activities'))
         const activities = await response.json()
         
         // 找到对应的活动ID
         const activity = activities.find(act => act.name === projectName)
         if (activity) {
           // 下载Excel文件
-          window.open(`http://localhost:5000/api/download/activity/${activity.id}`, '_blank')
+          window.open(apiUrl(`/api/download/activity/${activity.id}`), '_blank')
         } else {
           console.error('Activity not found:', projectName)
         }
@@ -334,7 +336,7 @@ export default {
     },
     downloadAllActivitiesExcel() {
       // 下载所有活动的Excel文件
-      window.open('http://localhost:5000/api/download/all-activities', '_blank')
+      window.open(apiUrl('/api/download/all-activities'), '_blank')
     }
   }
 }
