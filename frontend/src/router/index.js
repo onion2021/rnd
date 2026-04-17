@@ -7,8 +7,7 @@ import FlowDetail from '../views/FlowDetail.vue'
 const routes = [
   {
     path: '/',
-    name: 'AIAssistant',
-    component: AIAssistant
+    redirect: '/ai-assistant'
   },
   {
     path: '/ai-assistant',

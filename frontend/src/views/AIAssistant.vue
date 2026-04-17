@@ -128,7 +128,7 @@ export default {
       messageInput: '',
       aiMessages: [],
       isLoading: false,
-      language: 'zh'
+      language: 'en'
     }
   },
   computed: {
@@ -258,28 +258,19 @@ export default {
           } else {
             clearInterval(typingInterval)
             
-            // 从后端获取本次回答采纳的Main Activity
+            // 本次回答采纳的 Main Activity（你说的“相似案例”就是这一段）
+            // 优先使用后端结构化字段；如果为空，则从 llm_analysis 按模板兜底解析
             let referencedActivities = data.referenced_activities || []
-            
-            // 从相似案例中筛选出被引用的案例
-            let filteredSimilarCases = []
-            if (referencedActivities.length > 0 && data.rule_based.similar_cases) {
-              // 筛选出与本次回答相关但不在"本次回答采纳的案例"中的案例
-              filteredSimilarCases = data.rule_based.similar_cases.filter(caseItem => 
-                !referencedActivities.includes(caseItem.project_name)
-              )
-            } else {
-              // 如果没有被引用的案例，不显示任何相似案例
-              filteredSimilarCases = []
+            if (!referencedActivities || referencedActivities.length === 0) {
+              referencedActivities = this.extractReferencedActivitiesFromAnalysis(data.llm_analysis)
             }
-            
+
             // 最终替换为完整的结果消息，保持与流式输出一致
             this.aiMessages[messageIndex] = {
               type: 'ai',
               sender: 'AI Assistant',
               content: {
                 ...data.rule_based,
-                similar_cases: filteredSimilarCases,
                 referencedActivities: referencedActivities
               },
               contentType: 'result',
@@ -316,6 +307,42 @@ export default {
       this.messageInput = suggestion
       this.sendMessage()
     },
+    normalizeCaseName(name) {
+      return String(name ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+    },
+    extractReferencedActivitiesFromAnalysis(text) {
+      const raw = String(text ?? '')
+      if (!raw) return []
+
+      // 与后端模板保持一致：中文段落
+      const zh = raw.match(/##\s*\[本次回答采纳的Main Activity\][\s\S]*?(?:\r?\n\s*-\s*)([\s\S]*?)(?=\r?\n\s*##|\r?\n\s*#|$)/i)
+      // 英文段落
+      const en = raw.match(/##\s*\[Main Activity References\][\s\S]*?(?:\r?\n\s*-\s*)([\s\S]*?)(?=\r?\n\s*##|\r?\n\s*#|$)/i)
+
+      const block = (zh && zh[1]) ? zh[1] : (en && en[1]) ? en[1] : ''
+      if (!block) return []
+
+      // 支持 `- item` / `* item` / `1. item`
+      const lines = block.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      const items = []
+      for (const line of lines) {
+        const m = line.match(/^[-*]\s*(.+)$/) || line.match(/^\d+[\.\)]\s*(.+)$/)
+        if (m && m[1]) items.push(m[1].trim())
+      }
+
+      const seen = new Set()
+      const out = []
+      for (const name of items) {
+        const key = this.normalizeCaseName(name)
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        out.push(name.trim())
+      }
+      return out
+    },
     async downloadActivityExcel(projectName) {
       try {
         // 获取活动列表
@@ -323,7 +350,8 @@ export default {
         const activities = await response.json()
         
         // 找到对应的活动ID
-        const activity = activities.find(act => act.name === projectName)
+        const target = this.normalizeCaseName(projectName)
+        const activity = activities.find(act => this.normalizeCaseName(act.name) === target)
         if (activity) {
           // 下载Excel文件
           window.open(apiUrl(`/api/download/activity/${activity.id}`), '_blank')
