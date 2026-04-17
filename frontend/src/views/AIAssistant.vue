@@ -5,7 +5,7 @@
         <div class="chat-info">
           <div class="title-row">
             <h2>AI Assistant</h2>
-            <button class="lang-toggle" @click="toggleLanguage">
+            <button class="lang-toggle" @click="toggleLanguage" :disabled="isLoading">
               {{ language === 'zh' ? '中文' : 'EN' }}
             </button>
           </div>
@@ -15,7 +15,7 @@
           <div class="chat-avatar">
             <div class="avatar-icon">🤖</div>
           </div>
-          <button class="btn-secondary" @click="clearChat">
+          <button class="btn-secondary" @click="clearChat" :disabled="isLoading">
             <span class="btn-icon">🗑️</span>
             Clear Chat
           </button>
@@ -170,6 +170,7 @@ export default {
       this.aiMessages.push(welcomeMessage)
     },
     toggleLanguage() {
+      if (this.isLoading) return
       this.language = this.language === 'zh' ? 'en' : 'zh'
       // 清空消息并重新添加欢迎消息
       this.aiMessages = []
@@ -233,11 +234,13 @@ export default {
       })
       
       const data = await response.json()
+      const queryId = data.query_id
       
       // 构建完整响应内容，直接显示LLM分析结果
       let fullResponse = data.llm_analysis;
       
       // 模拟流式输出
+      if (!this.aiMessages[messageIndex]) return
       this.aiMessages[messageIndex] = {
         type: 'ai',
         sender: 'AI Assistant',
@@ -251,6 +254,11 @@ export default {
       
       return new Promise((resolve) => {
         const typingInterval = setInterval(() => {
+          if (!this.aiMessages[messageIndex]) {
+            clearInterval(typingInterval)
+            resolve()
+            return
+          }
           if (currentIndex < fullResponse.length) {
             this.aiMessages[messageIndex].content += fullResponse[currentIndex]
             currentIndex++
@@ -266,6 +274,10 @@ export default {
             }
 
             // 最终替换为完整的结果消息，保持与流式输出一致
+            if (!this.aiMessages[messageIndex]) {
+              resolve()
+              return
+            }
             this.aiMessages[messageIndex] = {
               type: 'ai',
               sender: 'AI Assistant',
@@ -279,6 +291,11 @@ export default {
             }
             
             this.scrollToBottom()
+
+            // 回答完成后再向后端拉取一次 references（不走LLM，只解析缓存的llm_analysis）
+            if (queryId) {
+              this.refreshReferencedActivities(queryId, messageIndex)
+            }
             resolve()
           }
         }, typingSpeed)
@@ -300,6 +317,7 @@ export default {
       })
     },
     clearChat() {
+      if (this.isLoading) return
       this.aiMessages = []
       this.addWelcomeMessage()
     },
@@ -317,20 +335,59 @@ export default {
       const raw = String(text ?? '')
       if (!raw) return []
 
-      // 与后端模板保持一致：中文段落
-      const zh = raw.match(/##\s*\[本次回答采纳的Main Activity\][\s\S]*?(?:\r?\n\s*-\s*)([\s\S]*?)(?=\r?\n\s*##|\r?\n\s*#|$)/i)
-      // 英文段落
-      const en = raw.match(/##\s*\[Main Activity References\][\s\S]*?(?:\r?\n\s*-\s*)([\s\S]*?)(?=\r?\n\s*##|\r?\n\s*#|$)/i)
+      // 更鲁棒的解析：
+      // - 兼容带/不带方括号
+      // - 兼容标题前缀为 #/##/### 或普通文本
+      // - 兼容列表符号为 -, *, 1.，甚至没有列表符号（逐行列出）
+      const linesAll = raw.split(/\r?\n/)
 
-      const block = (zh && zh[1]) ? zh[1] : (en && en[1]) ? en[1] : ''
-      if (!block) return []
+      const isHeading = (line) => /^\s*#{1,6}\s+/.test(line)
+      const isTargetHeading = (line) => {
+        const s = String(line ?? '').trim()
+        return (
+          /本次回答采纳的\s*Main\s*Activity/i.test(s) ||
+          /^\s*#+\s*\[?\s*本次回答采纳的\s*Main\s*Activity\s*\]?\s*$/i.test(s) ||
+          /Main\s*Activity\s*References/i.test(s)
+        )
+      }
 
-      // 支持 `- item` / `* item` / `1. item`
-      const lines = block.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+      // 找到目标标题所在行
+      let startIdx = -1
+      for (let i = 0; i < linesAll.length; i++) {
+        if (isTargetHeading(linesAll[i])) {
+          startIdx = i
+          break
+        }
+      }
+      if (startIdx === -1) return []
+
+      // 取标题之后，直到下一个 heading 或文本结束
+      const blockLines = []
+      for (let i = startIdx + 1; i < linesAll.length; i++) {
+        const line = linesAll[i]
+        if (isHeading(line)) break
+        blockLines.push(line)
+      }
+
+      const normalizedBlockLines = blockLines.map(l => String(l ?? '').trim()).filter(Boolean)
+      if (normalizedBlockLines.length === 0) return []
+
       const items = []
-      for (const line of lines) {
-        const m = line.match(/^[-*]\s*(.+)$/) || line.match(/^\d+[\.\)]\s*(.+)$/)
-        if (m && m[1]) items.push(m[1].trim())
+      for (const line of normalizedBlockLines) {
+        const m =
+          line.match(/^[-*]\s*(.+)$/) ||
+          line.match(/^\d+[\.\)]\s*(.+)$/) ||
+          line.match(/^\s*[-•]\s*(.+)$/)
+        if (m && m[1]) {
+          items.push(m[1].trim())
+          continue
+        }
+
+        // 没有列表符号的情况：如果这一行不像说明文字，就当作一个条目
+        //（经验规则：太短/包含冒号的说明文字跳过）
+        if (line.length >= 3 && !/[:：]\s*$/.test(line) && !/^(请|please)\b/i.test(line)) {
+          items.push(line.trim())
+        }
       }
 
       const seen = new Set()
@@ -342,6 +399,22 @@ export default {
         out.push(name.trim())
       }
       return out
+    },
+    async refreshReferencedActivities(queryId, messageIndex) {
+      try {
+        const res = await fetch(apiUrl(`/api/ai/query/${queryId}/references`))
+        if (!res.ok) return
+        const data = await res.json()
+        const list = data.referenced_activities || []
+        if (!Array.isArray(list) || list.length === 0) return
+        if (!this.aiMessages[messageIndex] || this.aiMessages[messageIndex].contentType !== 'result') return
+        this.aiMessages[messageIndex].content = {
+          ...this.aiMessages[messageIndex].content,
+          referencedActivities: list
+        }
+      } catch (e) {
+        // ignore
+      }
     },
     async downloadActivityExcel(projectName) {
       try {

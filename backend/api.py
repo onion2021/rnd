@@ -2,6 +2,9 @@ import pandas as pd
 import os
 import json
 import re
+import time
+import threading
+import uuid
 import requests
 import sqlite3
 from dotenv import load_dotenv
@@ -17,6 +20,11 @@ STATUS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'project_
 
 # SQLite数据库文件路径
 DB_FILE = os.path.join(os.path.dirname(__file__), 'pdm.db')
+
+# 轻量缓存：用于“回答后再拉取references”，避免再次调用LLM
+_AI_QUERY_CACHE = {}
+_AI_QUERY_CACHE_LOCK = threading.Lock()
+_AI_QUERY_CACHE_TTL_SECONDS = 60 * 30  # 30分钟
 
 # LLM配置
 LLM_BASE_URL = os.getenv('LLM_BASE_URL')
@@ -115,8 +123,9 @@ def call_llm(prompt, context, language='zh'):
 - **Engineer Insight**：提供深度行业见解。
 
 ## [本次回答采纳的Main Activity]
-- 请列出本次回答中参考的所有Main Activity名称，每行一个。"""
-            user_prompt = f"历史数据:\n{context}\n\n用户问题:\n{prompt}\n\n请严格按照上述Output Format输出，确保包含实验结论、关键参数/路径和Engineer Insight板块。回答必须基于提供的历史数据，不得虚构任何DOE编号或实验数据。"
+- 请列出本次回答中参考的所有Main Activity名称，每行一个。
+- **硬性要求**：此段落必须出现；如果本次回答未引用任何Main Activity，也必须输出该段落并写 `- 无`。"""
+            user_prompt = f"历史数据:\n{context}\n\n用户问题:\n{prompt}\n\n请严格按照上述Output Format输出。**硬性要求**：必须包含 `## [本次回答采纳的Main Activity]` 段落；若无引用也要输出并写 `- 无`。同时确保包含实验结论、关键参数/路径和Engineer Insight板块。回答必须基于提供的历史数据，不得虚构任何DOE编号或实验数据。"
         else:
             system_prompt = """# Role
 You are a senior R&D expert in the field of semiconductor packaging, with deep physical failure analysis (FA) expertise and extensive mass production experience in advanced packaging (such as Fan-out, Chiplet, Substrate-based packaging).
@@ -148,8 +157,9 @@ When processing user queries, please refer to the logic of the following column 
 - **Engineer Insight**: Provide deep industry insights.
 
 ## [Main Activity References]
-- Please list all Main Activity names referenced in this answer, one per line."""
-            user_prompt = f"Historical data:\n{context}\n\nUser question:\n{prompt}\n\nPlease output according to the above Output Format, ensuring to include the Experimental Conclusion, Key Parameters/Path, and Engineer Insight sections. Your answer must be based strictly on the provided historical data, and you must not fabricate any DOE numbers or experimental data."
+- Please list all Main Activity names referenced in this answer, one per line.
+- **Hard requirement**: this section must always be present; if none are referenced, output the section and write `- None`. """
+            user_prompt = f"Historical data:\n{context}\n\nUser question:\n{prompt}\n\nPlease output according to the above Output Format. **Hard requirement**: you must include the `## [Main Activity References]` section; if none are referenced, still output it and write `- None`. Ensure the Experimental Conclusion, Key Parameters/Path, and Engineer Insight sections are included. Your answer must be based strictly on the provided historical data, and you must not fabricate any DOE numbers or experimental data."
         
         data = {
             "model": LLM_MODEL,
@@ -524,30 +534,97 @@ def generate_ai_response(analysis, similar_cases, language='zh'):
 
 def extract_referenced_activities(llm_analysis):
     """从LLM分析结果中提取本次回答采纳的Main Activity"""
-    referenced_activities = []
-    if llm_analysis:
-        # 匹配中文格式（支持不同换行符格式和空格）
-        import re
-        zhMatch = re.search(r'##\s*\[本次回答采纳的Main Activity\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
-        if zhMatch:
-            # `str.split()` 不能直接接收 `re.Pattern`，这里改为 `re.split`
-            referenced_activities = re.split(r'\s*[\r\n]+\s*-\s*', zhMatch.group(1).strip())
-            referenced_activities = [item for item in referenced_activities if item and item.strip()]
-        # 匹配英文格式（支持不同换行符格式和空格）
-        enMatch = re.search(r'##\s*\[Main Activity References\]\s*[\r\n]+\s*-\s*(.+?)(?=\s*[\r\n]+##|$)', llm_analysis, re.DOTALL)
-        if enMatch:
-            referenced_activities = re.split(r'\s*[\r\n]+\s*-\s*', enMatch.group(1).strip())
-            referenced_activities = [item for item in referenced_activities if item and item.strip()]
-        # 如果没有匹配到，尝试直接从文本中提取活动名称
-        if not referenced_activities:
-            activityRegex = re.compile(r'-\s*(Post ELP Blister Activity|Dry Desmear Outsourcing|Dry \+ Wet Desmear pathfinding)')
-            matches = activityRegex.findall(llm_analysis)
-            referenced_activities = matches
-    return referenced_activities
+    raw = str(llm_analysis or "")
+    if not raw.strip():
+        return []
+
+    lines_all = re.split(r'\r?\n', raw)
+
+    def is_heading(line: str) -> bool:
+        return bool(re.match(r'^\s*#{1,6}\s+', line or ""))
+
+    def is_target_heading(line: str) -> bool:
+        s = (line or "").strip()
+        return (
+            re.search(r'本次回答采纳的\s*Main\s*Activity', s, re.I) is not None
+            or re.match(r'^\s*#+\s*\[?\s*本次回答采纳的\s*Main\s*Activity\s*\]?\s*$', s, re.I) is not None
+            or re.search(r'Main\s*Activity\s*References', s, re.I) is not None
+        )
+
+    start_idx = -1
+    for i, line in enumerate(lines_all):
+        if is_target_heading(line):
+            start_idx = i
+            break
+    if start_idx == -1:
+        # 最后兜底：直接抓取已知活动名（避免LLM不按模板输出时完全为空）
+        activity_regex = re.compile(r'(Post ELP Blister Activity|Dry Desmear Outsourcing|Dry \+ Wet Desmear pathfinding)')
+        return list(dict.fromkeys(activity_regex.findall(raw)))
+
+    block_lines = []
+    for i in range(start_idx + 1, len(lines_all)):
+        line = lines_all[i]
+        if is_heading(line):
+            break
+        block_lines.append(line)
+
+    normalized = [l.strip() for l in block_lines if l and l.strip()]
+    if not normalized:
+        return []
+
+    items = []
+    for line in normalized:
+        m = (
+            re.match(r'^[-*]\s*(.+)$', line)
+            or re.match(r'^\d+[\.\)]\s*(.+)$', line)
+            or re.match(r'^\s*[-•]\s*(.+)$', line)
+        )
+        if m and m.group(1):
+            items.append(m.group(1).strip())
+            continue
+        if len(line) >= 3 and not re.search(r'[:：]\s*$', line) and not re.match(r'^(请|please)\b', line, re.I):
+            items.append(line.strip())
+
+    seen = set()
+    out = []
+    for name in items:
+        key = re.sub(r'\s+', ' ', name.strip()).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(name.strip())
+    return out
+
+
+def _cache_set(query_id: str, llm_analysis: str):
+    now = time.time()
+    with _AI_QUERY_CACHE_LOCK:
+        _AI_QUERY_CACHE[query_id] = {"llm_analysis": llm_analysis or "", "ts": now}
+
+
+def _cache_get(query_id: str):
+    now = time.time()
+    with _AI_QUERY_CACHE_LOCK:
+        item = _AI_QUERY_CACHE.get(query_id)
+        if not item:
+            return None
+        if now - item.get("ts", 0) > _AI_QUERY_CACHE_TTL_SECONDS:
+            _AI_QUERY_CACHE.pop(query_id, None)
+            return None
+        return item
+
+
+def _cache_cleanup():
+    now = time.time()
+    with _AI_QUERY_CACHE_LOCK:
+        expired = [k for k, v in _AI_QUERY_CACHE.items() if now - v.get("ts", 0) > _AI_QUERY_CACHE_TTL_SECONDS]
+        for k in expired:
+            _AI_QUERY_CACHE.pop(k, None)
 
 @api.route('/ai/query', methods=['POST'])
 def ai_query():
     """AI助手查询接口"""
+    _cache_cleanup()
     data = request.json
     query = data.get('query', '')
     language = data.get('language', 'zh')
@@ -589,9 +666,13 @@ def ai_query():
     
     # 提取本次回答采纳的Main Activity
     referenced_activities = extract_referenced_activities(llm_response)
+
+    query_id = str(uuid.uuid4())
+    _cache_set(query_id, llm_response)
     
     # 构建响应
     response = {
+        'query_id': query_id,
         'rule_based': {
             'similar_cases': similar_cases,
             'recommended_params': [],
@@ -605,6 +686,18 @@ def ai_query():
     }
     
     return jsonify(response)
+
+
+@api.route('/ai/query/<query_id>/references', methods=['GET'])
+def ai_query_references(query_id):
+    """根据 query_id 返回本次回答采纳的 Main Activity（不再调用LLM）"""
+    item = _cache_get(query_id)
+    if not item:
+        return jsonify({'error': 'query_id not found or expired', 'referenced_activities': []}), 404
+
+    llm_analysis = item.get("llm_analysis", "")
+    referenced_activities = extract_referenced_activities(llm_analysis)
+    return jsonify({'query_id': query_id, 'referenced_activities': referenced_activities})
 
 # 活动流相关API
 
