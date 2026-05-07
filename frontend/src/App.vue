@@ -13,6 +13,14 @@
           <span class="nav-icon">📋</span>
           <span>Project List</span>
         </router-link>
+        <router-link to="/doe-comparison" class="nav-item" active-class="active">
+          <span class="nav-icon">DOE</span>
+          <span>DOE Comparison</span>
+        </router-link>
+        <router-link to="/doe-design" class="nav-item" active-class="active">
+          <span class="nav-icon">DES</span>
+          <span>DOE Design</span>
+        </router-link>
       </nav>
     </aside>
     <main class="main-content">

@@ -839,6 +839,95 @@ def find_related_project_cards(query, llm_response='', limit_projects=3):
 
     return final_projects[:limit_projects]
 
+
+def _join_search_parts(parts):
+    return '\n'.join(
+        str(part)
+        for part in parts
+        if part is not None and str(part).strip()
+    )
+
+
+def _fuzzy_matches(text, query):
+    normalized_query = _normalize_query_text(query)
+    if not normalized_query:
+        return True
+    return normalized_query in _normalize_query_text(text)
+
+
+def _project_name_text(project):
+    return _join_search_parts([
+        project.get('name', ''),
+        project.get('display_name', ''),
+    ])
+
+
+def _doe_detail_field_text(doe, target_label):
+    parts = []
+    for field in doe.get('detail_fields', []):
+        label = _normalize_query_text(field.get('label') or field.get('key'))
+        if label == _normalize_query_text(target_label):
+            parts.append(field.get('label', ''))
+            parts.append(field.get('value', ''))
+    return _join_search_parts(parts)
+
+
+def search_project_activities(filters):
+    projects = load_project_activities_from_db()
+    tool_query = filters.get('tool', '')
+    location_query = filters.get('location', '')
+    project_name_query = filters.get('project_name', '')
+    main_background_query = filters.get('main_activity_background', '')
+
+    filtered_projects = []
+    total_does = 0
+
+    for project in projects:
+        if not _fuzzy_matches(_project_name_text(project), project_name_query):
+            continue
+
+        if not _fuzzy_matches(project.get('background', ''), main_background_query):
+            continue
+
+        matching_does = []
+        for doe in project.get('does', []):
+            tool_text = _doe_detail_field_text(doe, 'Tool')
+            location_text = _doe_detail_field_text(doe, 'Location')
+
+            if not _fuzzy_matches(tool_text, tool_query):
+                continue
+            if not _fuzzy_matches(location_text, location_query):
+                continue
+
+            matching_does.append(_serialize_related_doe(doe))
+
+        if not matching_does:
+            continue
+
+        filtered_projects.append({
+            **project,
+            'does': matching_does,
+            'match_info': {
+                'matched_doe_count': len(matching_does),
+                'total_doe_count': len(project.get('does', [])),
+            },
+        })
+        total_does += len(matching_does)
+
+    return {
+        'projects': filtered_projects,
+        'search': {
+            'total_projects': len(filtered_projects),
+            'total_does': total_does,
+            'applied_filters': {
+                key: value
+                for key, value in filters.items()
+                if value
+            },
+        },
+    }
+
+
 def call_llm(prompt, context, language='zh'):
     """调用LLM进行分析"""
     # 某些本地模型兼容 OpenAI 格式但不要求鉴权，此时 LLM_API_KEY 可能为空
@@ -1698,6 +1787,21 @@ def get_project_activities():
     """Return grouped project cards from SQLite."""
     try:
         return jsonify(load_project_activities_from_db())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api.route('/project-activities/search', methods=['GET'])
+def search_project_activities_endpoint():
+    """Search project cards and DOE rows with field-level filters."""
+    try:
+        filters = {
+            'tool': request.args.get('tool', '').strip(),
+            'location': request.args.get('location', '').strip(),
+            'project_name': request.args.get('project_name', '').strip(),
+            'main_activity_background': request.args.get('main_activity_background', '').strip(),
+        }
+        return jsonify(search_project_activities(filters))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
