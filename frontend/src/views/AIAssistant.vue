@@ -9,77 +9,238 @@
               {{ language === 'zh' ? '中文' : 'EN' }}
             </button>
           </div>
-          <p>Semiconductor packaging expert</p>
+          <p>DOE data grounded semiconductor packaging assistant</p>
         </div>
+
         <div class="header-actions">
           <div class="chat-avatar">
-            <div class="avatar-icon">🤖</div>
+            <div class="avatar-icon">AI</div>
           </div>
           <button class="btn-secondary" @click="clearChat" :disabled="isLoading">
-            <span class="btn-icon">🗑️</span>
             Clear Chat
           </button>
         </div>
       </div>
     </header>
-    
+
     <main class="chat-container">
-      
       <div class="chat-messages" ref="chatContainer">
-        <div v-for="(message, index) in aiMessages" :key="index" :class="['message', message.type]" animation="fadeIn">
+        <div
+          v-for="(message, index) in aiMessages"
+          :key="index"
+          :class="['message', message.type]"
+        >
           <div class="message-content">
             <div class="message-header">
               <span class="message-sender">{{ message.sender }}</span>
               <span class="message-time">{{ message.timestamp }}</span>
             </div>
+
             <div class="message-body">
               <div v-if="message.type === 'user'" class="user-message">
                 {{ message.content }}
               </div>
-              <div v-else-if="message.type === 'ai'" class="ai-message">
+
+              <div v-else class="ai-message">
                 <div v-if="message.isTyping" class="typing-indicator">
                   <span></span>
                   <span></span>
                   <span></span>
                 </div>
+
                 <div v-else-if="message.contentType === 'text'" class="ai-text">
                   <div v-html="formatContent(message.content)"></div>
                 </div>
+
                 <div v-else-if="message.contentType === 'result'" class="ai-result">
-                  <div class="result-section" v-if="message.content.recommended_params.length">
-                    <h4>推荐工艺参数</h4>
-                    <ul>
-                      <li v-for="(param, idx) in message.content.recommended_params" :key="idx">
-                        <strong>{{ param.project }}:</strong> {{ param.params }}
-                      </li>
-                    </ul>
-                  </div>
-                  <div class="result-section" v-if="message.content.theoretical_suggestions.length">
-                    <h4>理论建议</h4>
-                    <p>{{ message.content.theoretical_suggestions[0].note }}</p>
-                    <ul>
-                      <li v-for="(suggestion, idx) in message.content.theoretical_suggestions[0].suggestions" :key="idx">
-                        {{ suggestion }}
-                      </li>
-                    </ul>
-                  </div>
-                  
-                  <!-- LLM分析结果 -->
                   <div class="result-section llm-analysis" v-if="message.llm_analysis">
-                    <h4>{{ language === 'zh' ? 'AI深度分析' : 'AI Deep Analysis' }}</h4>
+                    <h4>{{ language === 'zh' ? 'AI 数据回答' : 'AI Data Answer' }}</h4>
                     <div class="llm-content" v-html="formatContent(message.llm_analysis)"></div>
                   </div>
-                  
-                  <!-- 本次回答采纳的Main Activity下载 -->
-                  <div class="result-section" v-if="message.content.referencedActivities && message.content.referencedActivities.length">
-                    <h4>{{ language === 'zh' ? '相关案例' : 'Related Cases' }}</h4>
-                    <div class="cases-container">
-                      <div v-for="(activity, idx) in message.content.referencedActivities" :key="idx" class="case-item">
-                        <span class="case-name">{{ activity }}</span>
-                        <button class="download-btn" @click="downloadActivityExcel(activity)">
-                          <span class="download-icon">📥</span> {{ language === 'zh' ? '下载' : 'Download' }}
-                        </button>
-                      </div>
+
+                  <div
+                    class="result-section"
+                    v-if="message.content.projectCards && message.content.projectCards.length"
+                  >
+                    <h4>{{ language === 'zh' ? '相关 Project / DOE' : 'Related Project / DOE' }}</h4>
+                    <div class="project-cards">
+                      <article
+                        v-for="project in message.content.projectCards"
+                        :key="project.id"
+                        class="project-card"
+                        :class="{ expanded: getExpandedRelatedDoe(project) }"
+                      >
+                        <div class="project-card-header">
+                          <div>
+                            <p class="project-kicker">Project</p>
+                            <h5 class="project-title">
+                              {{ project.display_name || project.name }}
+                            </h5>
+                            <p
+                              v-if="project.display_name && project.display_name !== project.name"
+                              class="project-subtitle"
+                            >
+                              {{ project.name }}
+                            </p>
+                          </div>
+                          <span
+                            v-if="getProjectDoes(project).length"
+                            class="doe-count"
+                          >
+                            {{ getProjectDoes(project).length }} DOE
+                          </span>
+                        </div>
+
+                        <div v-if="project.background" class="project-background">
+                          <span class="field-label">Background</span>
+                          <div class="field-value multiline">{{ project.background }}</div>
+                        </div>
+
+                        <div
+                          v-if="getProjectDoes(project).length"
+                          class="project-does"
+                        >
+                          <span class="field-label">DOE</span>
+                          <div class="doe-chip-list">
+                            <button
+                              v-for="doe in getProjectDoes(project)"
+                              :key="doe.id"
+                              type="button"
+                              class="doe-chip"
+                              :class="{
+                                'is-related': isRelatedDoe(project, doe.id),
+                                'is-open': project.expandedDoeId === doe.id
+                              }"
+                              @click="toggleRelatedDoe(index, project.id, doe.id)"
+                            >
+                              {{ doe.doe_number }}
+                            </button>
+                          </div>
+                        </div>
+
+                        <transition name="expand">
+                          <div
+                            v-if="getExpandedRelatedDoe(project)"
+                            class="doe-panel"
+                          >
+                            <div class="doe-panel-header">
+                              <div class="doe-panel-meta">
+                                <span class="doe-pill">
+                                  DOE {{ getExpandedRelatedDoe(project).doe_number }}
+                                </span>
+                                <span
+                                  v-if="getExpandedRelatedDoe(project).order"
+                                  class="order-pill"
+                                >
+                                  {{ getExpandedRelatedDoe(project).order }}
+                                </span>
+                                <span
+                                  v-if="getExpandedRelatedDoe(project).activity_flow_doe_number"
+                                  class="order-pill"
+                                >
+                                  Flow {{ getExpandedRelatedDoe(project).activity_flow_doe_number }}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                class="collapse-button"
+                                @click="toggleRelatedDoe(index, project.id, getExpandedRelatedDoe(project).id)"
+                              >
+                                Hide
+                              </button>
+                            </div>
+
+                            <div
+                              v-if="getExpandedRelatedDoe(project).title"
+                              class="doe-title"
+                            >
+                              {{ getExpandedRelatedDoe(project).title }}
+                            </div>
+
+                            <div
+                              v-if="getExpandedRelatedDoe(project).detail_fields.length"
+                              class="detail-grid"
+                            >
+                              <div
+                                v-for="field in getExpandedRelatedDoe(project).detail_fields"
+                                :key="field.key"
+                                class="detail-card"
+                              >
+                                <span class="detail-label">{{ field.label }}</span>
+                                <div class="detail-value multiline">{{ field.value }}</div>
+                              </div>
+                            </div>
+
+                            <section
+                              v-if="getExpandedRelatedDoe(project).fixed_factors.length"
+                              class="section-block"
+                            >
+                              <h4 class="section-title">Fixed Factor</h4>
+                              <div class="factor-grid">
+                                <div
+                                  v-for="factor in getExpandedRelatedDoe(project).fixed_factors"
+                                  :key="factor.key"
+                                  class="factor-card"
+                                >
+                                  <span class="factor-name">{{ factor.name }}</span>
+                                  <div class="factor-condition multiline">{{ factor.condition }}</div>
+                                </div>
+                              </div>
+                            </section>
+
+                            <section
+                              v-if="getExpandedRelatedDoe(project).changed_factors.length"
+                              class="section-block"
+                            >
+                              <h4 class="section-title">Changed Factor</h4>
+                              <div class="factor-grid">
+                                <div
+                                  v-for="factor in getExpandedRelatedDoe(project).changed_factors"
+                                  :key="factor.key"
+                                  class="factor-card changed"
+                                >
+                                  <span class="factor-name">{{ factor.name }}</span>
+                                  <div class="factor-condition multiline">{{ factor.condition }}</div>
+                                </div>
+                              </div>
+                            </section>
+
+                            <section
+                              v-if="getExpandedRelatedDoe(project).evaluation_fields.length"
+                              class="section-block"
+                            >
+                              <h4 class="section-title">Additional Results</h4>
+                              <div class="factor-grid">
+                                <div
+                                  v-for="field in getExpandedRelatedDoe(project).evaluation_fields"
+                                  :key="field.key"
+                                  class="factor-card result"
+                                >
+                                  <span class="factor-name">{{ field.name }}</span>
+                                  <div class="factor-condition multiline">{{ field.condition }}</div>
+                                </div>
+                              </div>
+                            </section>
+
+                            <section
+                              v-if="getExpandedRelatedDoe(project).additional_fields.length"
+                              class="section-block"
+                            >
+                              <h4 class="section-title">Additional Info</h4>
+                              <div class="detail-grid compact">
+                                <div
+                                  v-for="field in getExpandedRelatedDoe(project).additional_fields"
+                                  :key="field.key"
+                                  class="detail-card"
+                                >
+                                  <span class="detail-label">{{ field.label }}</span>
+                                  <div class="detail-value multiline">{{ field.value }}</div>
+                                </div>
+                              </div>
+                            </section>
+                          </div>
+                        </transition>
+                      </article>
                     </div>
                   </div>
                 </div>
@@ -88,24 +249,25 @@
           </div>
         </div>
       </div>
-      
+
       <div class="chat-input-area">
         <form @submit.prevent="sendMessage" class="input-form">
-          <input 
-            v-model="messageInput" 
-            type="text" 
-            :placeholder="language === 'zh' ? '询问半导体封装相关问题...' : 'Ask about semiconductor packaging issues...'"
+          <input
+            v-model="messageInput"
+            type="text"
+            :placeholder="language === 'zh' ? '请输入和 DOE 数据相关的问题…' : 'Ask a question about the DOE data...'"
             class="chat-input"
             @keyup.enter="sendMessage"
             :disabled="isLoading"
           />
           <button type="submit" class="btn-primary send-btn" :disabled="isLoading">
-            <span class="send-icon">➤</span>
+            <span class="send-icon">→</span>
           </button>
         </form>
+
         <div class="suggestions" v-if="!isLoading">
-          <button 
-            v-for="(suggestion, index) in suggestions" 
+          <button
+            v-for="(suggestion, index) in suggestions"
             :key="index"
             class="suggestion-btn"
             @click="useSuggestion(suggestion)"
@@ -133,63 +295,73 @@ export default {
   },
   computed: {
     suggestions() {
+      return this.language === 'zh'
+        ? [
+            'Post ELP Blister 的 DOE 迭代路径和关键结论是什么？',
+            'Dry Desmear Outsourcing 中哪几个 DOE 表现最好？',
+            '比较 Dry Desmear Outsourcing 和 Dry + Wet Desmear Pathfinding 的结果差异',
+            '哪些 DOE 明确提到了铜附着力或 peel strength？'
+          ]
+        : [
+            'What is the DOE progression and key conclusion for Post ELP Blister?',
+            'Which DOE performed best in Dry Desmear Outsourcing?',
+            'Compare the results of Dry Desmear Outsourcing vs Dry + Wet Desmear Pathfinding',
+            'Which DOE explicitly mentions copper adhesion or peel strength?'
+          ]
+
       if (this.language === 'zh') {
         return [
-          '如何解决Post ELP Blister问题？',
-          '干法除胶外包有什么优缺点？',
-          '干法+湿法组合除胶工艺的效果如何？',
-          '如何优化半导体封装中的除胶工艺？'
-        ]
-      } else {
-        return [
-          'How to solve Post ELP Blister issues?',
-          'What are the pros and cons of Dry Desmear Outsourcing?',
-          'What is the effect of Dry + Wet Desmear pathfinding?',
-          'How to optimize desmear process in semiconductor packaging?'
+          '如何解决 Post ELP Blister 问题？',
+          'Dry Desmear Outsourcing 的 DOE 结论是什么？',
+          'Dry + Wet Desmear Pathfinding 哪些 DOE 表现最好？',
+          '和铜附着力相关的 DOE 数据有哪些？'
         ]
       }
+
+      return [
+        'How to solve Post ELP Blister issues?',
+        'What are the DOE conclusions for Dry Desmear Outsourcing?',
+        'Which DOE performed best in Dry + Wet Desmear Pathfinding?',
+        'Which DOE data is related to copper adhesion?'
+      ]
     }
   },
   mounted() {
-    // 添加欢迎消息
     this.addWelcomeMessage()
   },
   methods: {
     addWelcomeMessage() {
-      const welcomeContent = this.language === 'zh' 
-        ? '你好！我是你的半导体封装专家。我可以帮助你解决与封装类型、材料、失效模式和DOE实验设计相关的问题，特别是关于Post ELP Blister、干法除胶外包和干法+湿法组合除胶工艺等方面的问题。今天我能为你提供什么帮助？'
-        : 'Hello! I am your semiconductor packaging expert. I can help you with issues related to packaging types, materials, failure modes, and DOE experimental design, especially regarding Post ELP Blister, Dry Desmear Outsourcing, and Dry + Wet Desmear pathfinding. How can I assist you today?'
-      
-      const welcomeMessage = {
+      const welcomeContent = this.language === 'zh'
+        ? '你好，我会严格基于当前 DOE 数据回答你的问题，并在需要时给出相关 Project 和 DOE 编号。'
+        : 'Hello. I will answer strictly from the current DOE data and point out the relevant Project and DOE numbers when needed.'
+
+      this.aiMessages.push({
         type: 'ai',
         sender: 'AI Assistant',
         content: welcomeContent,
         contentType: 'text',
         timestamp: new Date().toLocaleTimeString()
-      }
-      this.aiMessages.push(welcomeMessage)
+      })
     },
     toggleLanguage() {
       if (this.isLoading) return
       this.language = this.language === 'zh' ? 'en' : 'zh'
-      // 清空消息并重新添加欢迎消息
       this.aiMessages = []
       this.addWelcomeMessage()
     },
     async sendMessage() {
       if (!this.messageInput.trim() || this.isLoading) return
-      
+
       const currentTime = new Date().toLocaleTimeString()
-      
-      // 添加用户消息
+      const query = this.messageInput
+
       this.aiMessages.push({
         type: 'user',
         sender: 'You',
-        content: this.messageInput,
+        content: query,
         timestamp: currentTime
       })
-      
-      // 添加AI正在输入的消息
+
       const typingMessageIndex = this.aiMessages.length
       this.aiMessages.push({
         type: 'ai',
@@ -197,24 +369,21 @@ export default {
         isTyping: true,
         timestamp: currentTime
       })
-      
-      const query = this.messageInput
+
       this.messageInput = ''
       this.isLoading = true
-      
+
       try {
-        // 滚动到底部
         this.scrollToBottom()
-        
-        // 模拟流式输出
         await this.simulateStreamingResponse(query, typingMessageIndex)
-        
       } catch (error) {
         console.error('Error sending AI query:', error)
         this.aiMessages[typingMessageIndex] = {
           type: 'ai',
           sender: 'AI Assistant',
-          content: 'Error: Failed to get response. Please try again.',
+          content: this.language === 'zh'
+            ? '请求失败，请稍后再试。'
+            : 'Request failed. Please try again.',
           contentType: 'text',
           timestamp: currentTime
         }
@@ -224,23 +393,21 @@ export default {
       }
     },
     async simulateStreamingResponse(query, messageIndex) {
-      // 首先发送请求获取完整响应
       const response = await fetch(apiUrl('/api/ai/query'), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream'
         },
         body: JSON.stringify({ query, language: this.language })
       })
-      
-      const data = await response.json()
-      const queryId = data.query_id
-      
-      // 构建完整响应内容，直接显示LLM分析结果
-      let fullResponse = data.llm_analysis;
-      
-      // 模拟流式输出
+
+      if (!response.ok) {
+        throw new Error('Failed to query AI backend')
+      }
+
       if (!this.aiMessages[messageIndex]) return
+
       this.aiMessages[messageIndex] = {
         type: 'ai',
         sender: 'AI Assistant',
@@ -248,65 +415,153 @@ export default {
         contentType: 'text',
         timestamp: this.aiMessages[messageIndex].timestamp
       }
-      
-      let currentIndex = 0
-      const typingSpeed = 15 // 打字速度（毫秒/字符）
-      
-      return new Promise((resolve) => {
-        const typingInterval = setInterval(() => {
-          if (!this.aiMessages[messageIndex]) {
-            clearInterval(typingInterval)
-            resolve()
-            return
-          }
-          if (currentIndex < fullResponse.length) {
-            this.aiMessages[messageIndex].content += fullResponse[currentIndex]
-            currentIndex++
-            this.scrollToBottom()
-          } else {
-            clearInterval(typingInterval)
-            
-            // 本次回答采纳的 Main Activity（你说的“相似案例”就是这一段）
-            // 优先使用后端结构化字段；如果为空，则从 llm_analysis 按模板兜底解析
-            let referencedActivities = data.referenced_activities || []
-            if (!referencedActivities || referencedActivities.length === 0) {
-              referencedActivities = this.extractReferencedActivitiesFromAnalysis(data.llm_analysis)
-            }
 
-            // 最终替换为完整的结果消息，保持与流式输出一致
-            if (!this.aiMessages[messageIndex]) {
-              resolve()
-              return
-            }
-            this.aiMessages[messageIndex] = {
-              type: 'ai',
-              sender: 'AI Assistant',
-              content: {
-                ...data.rule_based,
-                referencedActivities: referencedActivities
-              },
-              contentType: 'result',
-              llm_analysis: data.llm_analysis,
-              timestamp: this.aiMessages[messageIndex].timestamp
-            }
-            
-            this.scrollToBottom()
+      if (!response.body) {
+        throw new Error('Streaming response body is unavailable')
+      }
 
-            // 回答完成后再向后端拉取一次 references（不走LLM，只解析缓存的llm_analysis）
-            if (queryId) {
-              this.refreshReferencedActivities(queryId, messageIndex)
-            }
-            resolve()
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalPayload = null
+
+      while (true) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+
+        let eventBoundary = buffer.indexOf('\n\n')
+        while (eventBoundary !== -1) {
+          const rawEvent = buffer.slice(0, eventBoundary)
+          buffer = buffer.slice(eventBoundary + 2)
+          const parsedEvent = this.parseSseEvent(rawEvent)
+
+          if (parsedEvent?.event === 'message' && parsedEvent.data?.delta) {
+            if (!this.aiMessages[messageIndex]) return
+            this.aiMessages[messageIndex].content += parsedEvent.data.delta
+            this.scrollToBottom()
+          } else if (parsedEvent?.event === 'done') {
+            finalPayload = parsedEvent.data
+          } else if (parsedEvent?.event === 'error') {
+            throw new Error(parsedEvent.data?.message || 'Streaming request failed')
           }
-        }, typingSpeed)
-      })
+
+          eventBoundary = buffer.indexOf('\n\n')
+        }
+
+        if (done) break
+      }
+
+      const trailingEvent = this.parseSseEvent(buffer)
+      if (trailingEvent?.event === 'done') {
+        finalPayload = trailingEvent.data
+      } else if (trailingEvent?.event === 'error') {
+        throw new Error(trailingEvent.data?.message || 'Streaming request failed')
+      }
+
+      if (!this.aiMessages[messageIndex]) return
+
+      const finalText = finalPayload?.llm_analysis || this.aiMessages[messageIndex].content || ''
+      this.aiMessages[messageIndex] = {
+        type: 'ai',
+        sender: 'AI Assistant',
+        content: {
+          projectCards: this.normalizeProjectCards(finalPayload?.project_cards || [])
+        },
+        contentType: 'result',
+        llm_analysis: finalText,
+        timestamp: this.aiMessages[messageIndex].timestamp
+      }
+      this.scrollToBottom()
+    },
+    parseSseEvent(rawEvent) {
+      const normalized = String(rawEvent || '').trim()
+      if (!normalized || normalized.startsWith(':')) return null
+
+      let event = 'message'
+      const dataLines = []
+
+      for (const line of normalized.split(/\r?\n/)) {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart())
+        }
+      }
+
+      if (!dataLines.length) {
+        return { event, data: null }
+      }
+
+      const rawData = dataLines.join('\n')
+      try {
+        return {
+          event,
+          data: JSON.parse(rawData)
+        }
+      } catch {
+        return {
+          event,
+          data: { raw: rawData }
+        }
+      }
     },
     formatContent(content) {
-      // 将换行符转换为HTML换行
-      let formatted = content.replace(/\n/g, '<br>')
-      // 为标题添加样式
-      formatted = formatted.replace(/(\d+\.\s+)([^<]+)/g, '<strong>$1$2</strong>')
-      return formatted
+      const raw = String(content || '')
+      return raw
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/^##\s(.+)$/gm, '<strong>$1</strong>')
+        .replace(/^- /gm, '• ')
+        .replace(/\n/g, '<br>')
+    },
+    normalizeProjectCards(projectCards) {
+      return projectCards.map(project => {
+        const does = Array.isArray(project.does) ? project.does : []
+        const relatedDoeIds = Array.isArray(project.related_doe_ids) ? project.related_doe_ids : []
+        return {
+          ...project,
+          does,
+          related_doe_ids: relatedDoeIds,
+          related_doe_numbers: Array.isArray(project.related_doe_numbers) ? project.related_doe_numbers : [],
+          expandedDoeId: null
+        }
+      })
+    },
+    getProjectDoes(project) {
+      return Array.isArray(project.does) ? project.does : []
+    },
+    getRelatedDoes(project) {
+      const relatedDoeIds = new Set(Array.isArray(project.related_doe_ids) ? project.related_doe_ids : [])
+      return this.getProjectDoes(project).filter(doe => relatedDoeIds.has(doe.id))
+    },
+    isRelatedDoe(project, doeId) {
+      return Array.isArray(project.related_doe_ids) && project.related_doe_ids.includes(doeId)
+    },
+    getExpandedRelatedDoe(project) {
+      return this.getProjectDoes(project).find(doe => doe.id === project.expandedDoeId) || null
+    },
+    toggleRelatedDoe(messageIndex, projectId, doeId) {
+      const message = this.aiMessages[messageIndex]
+      if (!message || message.contentType !== 'result') return
+
+      this.aiMessages = this.aiMessages.map((entry, index) => {
+        if (index !== messageIndex) return entry
+
+        return {
+          ...entry,
+          content: {
+            ...entry.content,
+            projectCards: (entry.content.projectCards || []).map(project => {
+              if (project.id !== projectId) return project
+              return {
+                ...project,
+                expandedDoeId: project.expandedDoeId === doeId ? null : doeId
+              }
+            })
+          }
+        }
+      })
     },
     scrollToBottom() {
       this.$nextTick(() => {
@@ -324,120 +579,6 @@ export default {
     useSuggestion(suggestion) {
       this.messageInput = suggestion
       this.sendMessage()
-    },
-    normalizeCaseName(name) {
-      return String(name ?? '')
-        .trim()
-        .replace(/\s+/g, ' ')
-        .toLowerCase()
-    },
-    extractReferencedActivitiesFromAnalysis(text) {
-      const raw = String(text ?? '')
-      if (!raw) return []
-
-      // 更鲁棒的解析：
-      // - 兼容带/不带方括号
-      // - 兼容标题前缀为 #/##/### 或普通文本
-      // - 兼容列表符号为 -, *, 1.，甚至没有列表符号（逐行列出）
-      const linesAll = raw.split(/\r?\n/)
-
-      const isHeading = (line) => /^\s*#{1,6}\s+/.test(line)
-      const isTargetHeading = (line) => {
-        const s = String(line ?? '').trim()
-        return (
-          /本次回答采纳的\s*Main\s*Activity/i.test(s) ||
-          /^\s*#+\s*\[?\s*本次回答采纳的\s*Main\s*Activity\s*\]?\s*$/i.test(s) ||
-          /Main\s*Activity\s*References/i.test(s)
-        )
-      }
-
-      // 找到目标标题所在行
-      let startIdx = -1
-      for (let i = 0; i < linesAll.length; i++) {
-        if (isTargetHeading(linesAll[i])) {
-          startIdx = i
-          break
-        }
-      }
-      if (startIdx === -1) return []
-
-      // 取标题之后，直到下一个 heading 或文本结束
-      const blockLines = []
-      for (let i = startIdx + 1; i < linesAll.length; i++) {
-        const line = linesAll[i]
-        if (isHeading(line)) break
-        blockLines.push(line)
-      }
-
-      const normalizedBlockLines = blockLines.map(l => String(l ?? '').trim()).filter(Boolean)
-      if (normalizedBlockLines.length === 0) return []
-
-      const items = []
-      for (const line of normalizedBlockLines) {
-        const m =
-          line.match(/^[-*]\s*(.+)$/) ||
-          line.match(/^\d+[\.\)]\s*(.+)$/) ||
-          line.match(/^\s*[-•]\s*(.+)$/)
-        if (m && m[1]) {
-          items.push(m[1].trim())
-          continue
-        }
-
-        // 没有列表符号的情况：如果这一行不像说明文字，就当作一个条目
-        //（经验规则：太短/包含冒号的说明文字跳过）
-        if (line.length >= 3 && !/[:：]\s*$/.test(line) && !/^(请|please)\b/i.test(line)) {
-          items.push(line.trim())
-        }
-      }
-
-      const seen = new Set()
-      const out = []
-      for (const name of items) {
-        const key = this.normalizeCaseName(name)
-        if (!key || seen.has(key)) continue
-        seen.add(key)
-        out.push(name.trim())
-      }
-      return out
-    },
-    async refreshReferencedActivities(queryId, messageIndex) {
-      try {
-        const res = await fetch(apiUrl(`/api/ai/query/${queryId}/references`))
-        if (!res.ok) return
-        const data = await res.json()
-        const list = data.referenced_activities || []
-        if (!Array.isArray(list) || list.length === 0) return
-        if (!this.aiMessages[messageIndex] || this.aiMessages[messageIndex].contentType !== 'result') return
-        this.aiMessages[messageIndex].content = {
-          ...this.aiMessages[messageIndex].content,
-          referencedActivities: list
-        }
-      } catch (e) {
-        // ignore
-      }
-    },
-    async downloadActivityExcel(projectName) {
-      try {
-        // 获取活动列表
-        const response = await fetch(apiUrl('/api/activities'))
-        const activities = await response.json()
-        
-        // 找到对应的活动ID
-        const target = this.normalizeCaseName(projectName)
-        const activity = activities.find(act => this.normalizeCaseName(act.name) === target)
-        if (activity) {
-          // 下载Excel文件
-          window.open(apiUrl(`/api/download/activity/${activity.id}`), '_blank')
-        } else {
-          console.error('Activity not found:', projectName)
-        }
-      } catch (error) {
-        console.error('Error downloading activity Excel:', error)
-      }
-    },
-    downloadAllActivitiesExcel() {
-      // 下载所有活动的Excel文件
-      window.open(apiUrl('/api/download/all-activities'), '_blank')
     }
   }
 }
@@ -460,11 +601,7 @@ export default {
   align-items: center;
   padding: var(--spacing-md) var(--spacing-xl);
   background: var(--surface-secondary);
-  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border-color);
-  z-index: 100;
-  box-sizing: border-box;
-  flex-shrink: 0;
 }
 
 .header-content {
@@ -473,9 +610,33 @@ export default {
   align-items: center;
   width: 100%;
   max-width: 1400px;
-  margin: 0 auto;
-  height: var(--header-height);
   gap: var(--spacing-xl);
+}
+
+.chat-info h2 {
+  margin: 0;
+  color: var(--primary-color);
+  font-size: var(--font-size-xl);
+}
+
+.chat-info p {
+  margin: var(--spacing-xs) 0 0 0;
+  color: var(--text-secondary);
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.lang-toggle {
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--primary-color);
+  border: 1px solid var(--border-primary);
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-full);
+  cursor: pointer;
 }
 
 .header-actions {
@@ -484,9 +645,16 @@ export default {
   gap: var(--spacing-md);
 }
 
-.btn-icon {
-  margin-right: var(--spacing-xs);
-  font-size: var(--font-size-md);
+.chat-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: var(--font-weight-bold);
 }
 
 .chat-container {
@@ -513,132 +681,29 @@ export default {
   box-shadow: var(--shadow-sm);
 }
 
-.chat-info {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  height: 100%;
-  text-align: center;
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  justify-content: center;
-}
-
-.chat-info h2 {
-  margin: 0;
-  color: var(--primary-color);
-  font-size: var(--font-size-xl);
-  line-height: var(--line-height-tight);
-  font-weight: var(--font-weight-bold);
-}
-
-.lang-toggle {
-  background: rgba(0, 212, 255, 0.1);
-  color: var(--primary-color);
-  border: 1px solid var(--border-primary);
-  padding: var(--spacing-xs) var(--spacing-md);
-  border-radius: var(--radius-full);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.lang-toggle:hover {
-  background: rgba(0, 212, 255, 0.2);
-  border-color: var(--primary-color);
-  transform: scale(1.05);
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
-}
-
-.lang-toggle:active {
-  transform: scale(0.95);
-}
-
-.chat-info p {
-  margin: var(--spacing-xs) 0 0 0;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-tight);
-}
-
-.chat-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-lg);
-  transition: all var(--transition-normal);
-}
-
-.chat-avatar:hover {
-  transform: scale(1.05);
-  box-shadow: var(--shadow-xl);
-}
-
-.avatar-icon {
-  font-size: var(--font-size-xl);
-  font-weight: bold;
-  color: white;
-}
-
 .message {
   margin-bottom: var(--spacing-lg);
   max-width: 85%;
-  animation: messageFadeIn 0.3s ease;
-}
-
-@keyframes messageFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .message.user {
-  align-self: flex-end;
   margin-left: auto;
-}
-
-.message.ai {
-  align-self: flex-start;
 }
 
 .message-content {
   padding: var(--spacing-lg);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  font-size: var(--font-size-md);
-  position: relative;
-  overflow: hidden;
 }
 
 .message.user .message-content {
-  background: rgba(0, 255, 128, 0.1);
+  background: rgba(0, 255, 128, 0.08);
   border: 1px solid var(--border-secondary);
-  border-bottom-right-radius: var(--radius-sm);
 }
 
 .message.ai .message-content {
   background: var(--surface-secondary);
   border: 1px solid var(--border-primary);
-  border-bottom-left-radius: var(--radius-sm);
 }
 
 .message-header {
@@ -659,31 +724,16 @@ export default {
   font-size: var(--font-size-xs);
 }
 
-.message-body {
-  line-height: var(--line-height-relaxed);
-}
-
-.user-message {
-  word-wrap: break-word;
-}
-
-.ai-message {
-  word-wrap: break-word;
-}
-
-/* 打字指示器样式 */
 .typing-indicator {
   display: flex;
-  align-items: center;
   gap: var(--spacing-xs);
-  padding: var(--spacing-sm) 0;
 }
 
 .typing-indicator span {
   width: 10px;
   height: 10px;
-  background: var(--primary-color);
   border-radius: 50%;
+  background: var(--primary-color);
   animation: typing 1.4s infinite ease-in-out both;
 }
 
@@ -704,237 +754,252 @@ export default {
   }
 }
 
-/* 结果部分样式 */
 .result-section {
   margin-bottom: var(--spacing-md);
   padding: var(--spacing-md);
   background: var(--surface-primary);
   border-radius: var(--radius-md);
   border-left: 4px solid var(--primary-color);
-  box-shadow: var(--shadow-sm);
-  transition: all var(--transition-normal);
-}
-
-.result-section:hover {
-  transform: translateX(4px);
-  box-shadow: var(--shadow-md);
 }
 
 .result-section h4 {
   margin: 0 0 var(--spacing-md) 0;
   color: var(--primary-color);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
 }
 
-.result-section ul {
-  margin: 0;
-  padding-left: var(--spacing-xl);
-}
-
-.cases-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  margin-bottom: var(--spacing-md);
-}
-
-.case-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-sm);
-  background: var(--surface-tertiary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  transition: all var(--transition-normal);
-}
-
-.case-item:hover {
-  background: var(--surface-secondary);
-  border-color: var(--primary-color);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.case-name {
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
-  flex: 1;
-}
-
-.download-btn {
-  background: rgba(0, 212, 255, 0.1);
-  color: var(--primary-color);
-  border: 1px solid var(--border-primary);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  white-space: nowrap;
-}
-
-.download-btn:hover {
-  background: rgba(0, 212, 255, 0.2);
-  border-color: var(--primary-color);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.download-all-container {
-  display: flex;
-  justify-content: center;
-  margin-top: var(--spacing-md);
-}
-
-.download-all-btn {
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-  color: white;
-  border: none;
-  padding: var(--spacing-sm) var(--spacing-lg);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  white-space: nowrap;
-}
-
-.download-all-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-xl);
-}
-
-.download-icon {
-  font-size: var(--font-size-md);
-}
-
-.result-section ul {
-  margin: 0;
-  padding-left: var(--spacing-xl);
-}
-
-.result-section li {
-  margin-bottom: var(--spacing-xs);
-  line-height: var(--line-height-normal);
-  font-size: var(--font-size-md);
-}
-
-.result-section li strong {
-  color: var(--primary-light);
-  font-weight: var(--font-weight-semibold);
-}
-
-/* 核心实战经验和其他部分的文本格式化 */
-.result-section ul {
-  list-style-type: none;
-  padding-left: 0;
-}
-
-.result-section ul li {
-  position: relative;
-  padding-left: var(--spacing-lg);
-  margin-bottom: var(--spacing-sm);
+.llm-content {
   line-height: var(--line-height-relaxed);
 }
 
-.result-section ul li:before {
-  content: "•";
-  position: absolute;
-  left: 0;
-  color: var(--primary-color);
-  font-weight: bold;
-}
-
-/* 核心实战经验样式 */
-.insights-container {
+.project-cards {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
 }
 
-.insight-item {
-  background: var(--surface-tertiary);
-  border-radius: var(--radius-md);
+.project-card {
+  background:
+    linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(7, 18, 38, 0.08)),
+    var(--surface-tertiary);
   border: 1px solid var(--border-color);
-  padding: var(--spacing-md);
-  transition: all var(--transition-normal);
-}
-
-.insight-item:hover {
-  background: var(--surface-secondary);
-  border-color: var(--primary-color);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.insight-header {
-  margin-bottom: var(--spacing-sm);
-  color: var(--primary-color);
-  font-weight: var(--font-weight-semibold);
-}
-
-.insight-content {
-  line-height: var(--line-height-relaxed);
-  font-size: var(--font-size-md);
-  color: var(--text-primary);
-}
-
-.result-section li strong {
-  color: var(--primary-light);
-  font-weight: var(--font-weight-semibold);
-}
-
-/* LLM分析结果样式 */
-.llm-analysis {
-  background: rgba(0, 212, 255, 0.05);
-  border-left: 4px solid var(--primary-color);
-  padding: var(--spacing-lg);
   border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.project-card.expanded {
+  border-color: var(--border-primary);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.22);
+}
+
+.project-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.doe-count {
+  flex-shrink: 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-full);
+  background: rgba(0, 212, 255, 0.14);
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.project-kicker {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary-color);
+}
+
+.project-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.project-subtitle {
+  margin: var(--spacing-xs) 0 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.project-background,
+.project-does {
   margin-top: var(--spacing-md);
-  box-shadow: var(--shadow-sm);
 }
 
-.llm-content {
-  line-height: var(--line-height-relaxed);
-  color: var(--text-primary);
-  font-size: var(--font-size-md);
-}
-
-.llm-content strong {
+.field-label {
+  display: block;
+  margin-bottom: var(--spacing-xs);
   color: var(--primary-color);
   font-weight: var(--font-weight-semibold);
-  margin-bottom: var(--spacing-sm);
-  display: block;
 }
 
-.llm-content br {
-  margin-bottom: var(--spacing-sm);
+.detail-label,
+.factor-name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--primary-color);
 }
 
-/* 聊天输入区域 */
+.field-value,
+.detail-value,
+.factor-condition,
+.multiline {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.doe-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.doe-chip,
+.collapse-button {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  padding: 0.45rem 0.9rem;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.doe-chip:hover,
+.collapse-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.doe-chip.is-related {
+  background: rgba(0, 212, 255, 0.18);
+  border-color: rgba(0, 212, 255, 0.6);
+  color: var(--primary-color);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.12);
+}
+
+.doe-chip.is-open {
+  border-color: var(--primary-color);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.22);
+}
+
+.doe-panel {
+  margin-top: var(--spacing-lg);
+  padding-top: var(--spacing-lg);
+  border-top: 1px solid rgba(0, 212, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.doe-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.doe-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.doe-pill,
+.order-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-sm);
+}
+
+.doe-pill {
+  background: var(--primary-color);
+  color: white;
+}
+
+.order-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.doe-title {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.detail-grid,
+.factor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-md);
+}
+
+.detail-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-card,
+.factor-card {
+  background: var(--surface-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.section-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--text-primary);
+}
+
+.factor-card.changed {
+  border-left: 3px solid #f59e0b;
+}
+
+.factor-card.result {
+  border-left: 3px solid #22c55e;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.2s ease;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 .chat-input-area {
   background: var(--surface-primary);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
   padding: var(--spacing-lg);
-  max-height: 220px;
-  overflow-y: auto;
-  box-shadow: var(--shadow-sm);
-  transition: all var(--transition-normal);
-}
-
-.chat-input-area:focus-within {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
 }
 
 .input-form {
@@ -942,7 +1007,6 @@ export default {
   gap: var(--spacing-md);
   align-items: center;
   margin-bottom: var(--spacing-md);
-  flex-shrink: 0;
 }
 
 .chat-input {
@@ -952,16 +1016,12 @@ export default {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-full);
   color: var(--text-primary);
-  font-size: var(--font-size-md);
-  transition: all var(--transition-normal);
-  min-width: 0;
 }
 
 .chat-input:focus {
   outline: none;
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
-  background: var(--surface-tertiary);
 }
 
 .send-btn {
@@ -972,43 +1032,12 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--font-size-lg);
-  flex-shrink: 0;
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-  color: white;
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  box-shadow: var(--shadow-md);
 }
 
-.send-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-xl);
-}
-
-.send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: var(--shadow-sm);
-}
-
-.send-icon {
-  font-size: var(--font-size-lg);
-  transition: all var(--transition-normal);
-}
-
-.send-btn:hover:not(:disabled) .send-icon {
-  transform: scale(1.1);
-}
-
-/* 建议区域 */
 .suggestions {
   display: flex;
   gap: var(--spacing-sm);
   flex-wrap: wrap;
-  margin-top: var(--spacing-sm);
 }
 
 .suggestion-btn {
@@ -1017,176 +1046,62 @@ export default {
   border-radius: var(--radius-xxl);
   padding: var(--spacing-sm) var(--spacing-md);
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all var(--transition-normal);
-  white-space: nowrap;
 }
 
 .suggestion-btn:hover {
   background: rgba(0, 212, 255, 0.1);
   border-color: var(--primary-color);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
 }
 
-/* 滚动条样式 */
-.chat-messages::-webkit-scrollbar {
-  width: 8px;
-}
-
-.chat-messages::-webkit-scrollbar-track {
-  background: var(--surface-secondary);
-  border-radius: var(--radius-sm);
-}
-
-.chat-messages::-webkit-scrollbar-thumb {
-  background: rgba(0, 212, 255, 0.3);
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-normal);
-}
-
-.chat-messages::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 212, 255, 0.5);
-}
-
-/* 响应式设计 */
 @media (max-width: 768px) {
   .ai-header {
     padding: var(--spacing-sm) var(--spacing-md);
   }
-  
+
   .header-content {
+    flex-direction: column;
+    align-items: stretch;
     gap: var(--spacing-md);
-    flex-direction: column;
-    height: auto;
-    padding: var(--spacing-sm) 0;
   }
-  
-  .chat-info {
-    text-align: center;
-  }
-  
-  .title-row {
-    flex-direction: column;
-    gap: var(--spacing-sm);
-  }
-  
+
+  .title-row,
   .header-actions {
-    flex-direction: column;
-    gap: var(--spacing-sm);
-    width: 100%;
-    align-items: center;
+    justify-content: center;
   }
-  
+
   .chat-container {
     padding: var(--spacing-md);
-    height: calc(100vh - 180px);
   }
-  
-  .chat-info h2 {
-    font-size: var(--font-size-lg);
-  }
-  
-  .chat-info p {
-    font-size: var(--font-size-xs);
-  }
-  
-  .chat-avatar {
-    width: 40px;
-    height: 40px;
-  }
-  
-  .avatar-icon {
-    font-size: var(--font-size-md);
-  }
-  
+
   .message {
-    max-width: 95%;
+    max-width: 100%;
   }
-  
-  .message-content {
-    padding: var(--spacing-md);
-    font-size: var(--font-size-sm);
+
+  .project-card-header,
+  .doe-panel-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
-  
-  .message-header {
-    font-size: var(--font-size-xs);
+
+  .detail-grid,
+  .detail-grid.compact,
+  .factor-grid {
+    grid-template-columns: 1fr;
   }
-  
-  .chat-input {
-    padding: var(--spacing-sm) var(--spacing-md);
-    font-size: var(--font-size-sm);
+
+  .input-form {
+    align-items: stretch;
   }
-  
+
   .send-btn {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
+    align-self: center;
   }
-  
+
   .suggestions {
     flex-direction: column;
-    gap: var(--spacing-xs);
-  }
-  
-  .suggestion-btn {
-    width: 100%;
-    text-align: left;
-    padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: var(--font-size-xs);
-  }
-  
-  .chat-input-area {
-    padding: var(--spacing-md);
-  }
-  
-  .input-form {
-    margin-bottom: var(--spacing-sm);
-  }
-  
-  .btn-secondary {
-    font-size: var(--font-size-xs);
-    padding: var(--spacing-xs) var(--spacing-sm);
-    width: 100%;
-  }
-  
-  .btn-icon {
-    font-size: var(--font-size-sm);
-  }
-  
-  .result-section {
-    padding: var(--spacing-sm);
-  }
-  
-  .result-section h4 {
-    font-size: var(--font-size-md);
-  }
-  
-  .result-section li {
-    font-size: var(--font-size-sm);
-  }
-}
-
-/* 平板设备响应式设计 */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .chat-container {
-    padding: var(--spacing-md);
-  }
-  
-  .chat-messages {
-    max-height: calc(100vh - 200px);
-  }
-  
-  .message {
-    max-width: 90%;
-  }
-  
-  .header-content {
-    gap: var(--spacing-lg);
-  }
-  
-  .result-section {
-    padding: var(--spacing-sm);
   }
 }
 </style>

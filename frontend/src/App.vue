@@ -11,7 +11,7 @@
         </router-link>
         <router-link to="/flow-list" class="nav-item" active-class="active">
           <span class="nav-icon">📋</span>
-          <span>Flow List</span>
+          <span>Project List</span>
         </router-link>
       </nav>
     </aside>

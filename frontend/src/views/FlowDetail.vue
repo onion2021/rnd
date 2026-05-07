@@ -1,56 +1,49 @@
 <template>
   <div class="flow-detail">
-    <div v-if="loading" class="loading">Loading...</div>
-    <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else-if="flow">
-      <div class="back-button" @click="goBack">
-        ← Back to Flow List
-      </div>
-      
-      <div class="flow-header">
-        <h1 class="flow-title">{{ flow.name }}</h1>
-        <div class="flow-meta">
-          <span class="meta-item">ID: {{ flow.id }}</span>
-          <span class="meta-item">Created: {{ formatDate(flow.created_at) }}</span>
+    <div v-if="loading" class="state-message">Loading project...</div>
+    <div v-else-if="error" class="state-message error">{{ error }}</div>
+    <div v-else-if="project">
+      <button class="back-button" @click="goBack">← Back to Project List</button>
+
+      <header class="detail-header">
+        <p class="detail-kicker">Project</p>
+        <h1 class="detail-title">{{ project.display_name || project.name }}</h1>
+        <p v-if="project.background" class="detail-background">{{ project.background }}</p>
+      </header>
+
+      <section class="doe-section" v-for="doe in project.does" :key="doe.id">
+        <div class="doe-header">
+          <span class="doe-pill">DOE {{ doe.doe_number }}</span>
+          <span v-if="doe.order" class="order-pill">{{ doe.order }}</span>
         </div>
-      </div>
-      
-      <div class="flow-content">
-        <div class="section">
-          <h2 class="section-title">Background</h2>
-          <div class="section-content">{{ flow.background }}</div>
+
+        <div class="detail-grid" v-if="doe.detail_fields.length">
+          <div v-for="field in doe.detail_fields" :key="field.key" class="detail-card">
+            <span class="field-label">{{ field.label }}</span>
+            <div class="field-value multiline">{{ field.value }}</div>
+          </div>
         </div>
-        
-        <div v-if="flow.sub_activities && flow.sub_activities.length > 0" class="section">
-          <h2 class="section-title">Activity Flow</h2>
-          <div class="flow-container">
-            <div 
-              v-for="(sub, index) in flow.sub_activities" 
-              :key="sub.id" 
-              class="flow-item"
-            >
-              <div class="flow-number">{{ sub.order_num }}</div>
-              <div class="flow-content">
-                <div class="flow-header">
-                  <span class="doe-number">{{ sub.doe_number }}</span>
-                </div>
-                <h3 class="flow-title">{{ sub.activity_name }}</h3>
-                <div class="flow-background">{{ sub.background }}</div>
-                <div class="flow-result">
-                  <h4>Result</h4>
-                  <div>{{ sub.result }}</div>
-                </div>
-              </div>
-              <div v-if="index < flow.sub_activities.length - 1" class="flow-arrow">↓</div>
+
+        <div v-if="doe.fixed_factors.length" class="factor-section">
+          <h3>Fixed Factor</h3>
+          <div class="detail-grid">
+            <div v-for="factor in doe.fixed_factors" :key="factor.key" class="detail-card">
+              <span class="field-label">{{ factor.name }}</span>
+              <div class="field-value multiline">{{ factor.condition }}</div>
             </div>
           </div>
         </div>
-        
-        <div v-if="flow.summary" class="section">
-          <h2 class="section-title">Summary</h2>
-          <div class="section-content">{{ flow.summary }}</div>
+
+        <div v-if="doe.changed_factors.length" class="factor-section">
+          <h3>Changed Factor</h3>
+          <div class="detail-grid">
+            <div v-for="factor in doe.changed_factors" :key="factor.key" class="detail-card changed">
+              <span class="field-label">{{ factor.name }}</span>
+              <div class="field-value multiline">{{ factor.condition }}</div>
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   </div>
 </template>
@@ -62,39 +55,31 @@ export default {
   name: 'FlowDetail',
   data() {
     return {
-      flow: null,
+      project: null,
       loading: true,
       error: null
     }
   },
   mounted() {
-    this.fetchFlowDetail()
+    this.fetchProject()
   },
   methods: {
-    async fetchFlowDetail() {
+    async fetchProject() {
       this.loading = true
       this.error = null
+
       try {
         const id = this.$route.params.id
-        const response = await fetch(apiUrl(`/api/activities/${id}`))
+        const response = await fetch(apiUrl(`/api/project-activities/${id}`))
         if (!response.ok) {
-          throw new Error('Failed to fetch flow detail')
+          throw new Error('Failed to fetch project detail')
         }
-        this.flow = await response.json()
+        this.project = await response.json()
       } catch (err) {
         this.error = err.message
       } finally {
         this.loading = false
       }
-    },
-    formatDate(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      })
     },
     goBack() {
       this.$router.push('/flow-list')
@@ -109,203 +94,120 @@ export default {
   min-height: 100vh;
 }
 
-.loading {
-  text-align: center;
+.state-message {
   padding: var(--spacing-lg);
-  color: var(--text-secondary);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-md);
 }
 
-.error {
-  text-align: center;
-  padding: var(--spacing-lg);
+.state-message.error {
   color: var(--error-color);
-  background: rgba(255, 0, 0, 0.1);
-  border-radius: var(--radius-md);
+  background: rgba(255, 0, 0, 0.08);
 }
 
 .back-button {
-  display: inline-block;
-  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+  border: 1px solid var(--border-color);
   background: var(--surface-secondary);
   color: var(--text-primary);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
+  padding: var(--spacing-sm) var(--spacing-md);
   cursor: pointer;
-  margin-bottom: var(--spacing-lg);
-  transition: all var(--transition-fast);
 }
 
-.back-button:hover {
-  background: var(--surface-hover);
-  transform: translateX(-4px);
-}
-
-.flow-header {
+.detail-header {
   margin-bottom: var(--spacing-xl);
 }
 
-.flow-title {
-  font-size: var(--font-size-xxl);
-  font-weight: bold;
-  color: var(--text-primary);
+.detail-kicker {
+  margin: 0 0 var(--spacing-xs) 0;
+  color: var(--primary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.detail-title {
   margin: 0 0 var(--spacing-md) 0;
 }
 
-.flow-meta {
-  display: flex;
-  gap: var(--spacing-md);
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.meta-item {
-  background: var(--surface-secondary);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-sm);
-}
-
-.flow-content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xl);
-}
-
-.section {
-  background: var(--surface-secondary);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-lg);
-  border: 1px solid var(--border-color);
-}
-
-.section-title {
-  font-size: var(--font-size-lg);
-  font-weight: bold;
-  color: var(--text-primary);
-  margin: 0 0 var(--spacing-md) 0;
-  border-bottom: 2px solid var(--primary-color);
-  padding-bottom: var(--spacing-sm);
-}
-
-.section-content {
+.detail-background {
+  margin: 0;
   color: var(--text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
-.flow-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-lg);
+.doe-section {
+  margin-bottom: var(--spacing-xl);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-lg);
 }
 
-.flow-item {
+.doe-header {
   display: flex;
-  gap: var(--spacing-md);
-  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
 }
 
-.flow-number {
-  flex-shrink: 0;
-  width: 60px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.doe-pill,
+.order-pill {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-full);
+}
+
+.doe-pill {
   background: var(--primary-color);
   color: white;
-  font-size: var(--font-size-xl);
-  font-weight: bold;
-  border-radius: 50%;
-  box-shadow: var(--shadow-md);
 }
 
-.flow-content {
-  flex: 1;
+.order-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-md);
+}
+
+.detail-card {
   background: var(--surface-tertiary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  border-left: 4px solid var(--primary-color);
 }
 
-.flow-header {
-  margin-bottom: var(--spacing-sm);
+.detail-card.changed {
+  border-left: 3px solid #f59e0b;
 }
 
-.doe-number {
-  display: inline-block;
-  background: var(--primary-color);
-  color: white;
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  font-weight: bold;
-}
-
-.flow-title {
-  font-size: var(--font-size-lg);
-  font-weight: bold;
-  color: var(--text-primary);
-  margin: 0 0 var(--spacing-sm) 0;
-}
-
-.flow-background {
-  color: var(--text-secondary);
-  font-size: var(--font-size-md);
-  line-height: 1.5;
-  margin-bottom: var(--spacing-md);
-}
-
-.flow-result {
-  background: var(--surface-secondary);
-  padding: var(--spacing-sm);
-  border-radius: var(--radius-sm);
-  margin-top: var(--spacing-sm);
-}
-
-.flow-result h4 {
-  font-size: var(--font-size-md);
-  font-weight: bold;
-  color: var(--text-primary);
-  margin: 0 0 var(--spacing-xs) 0;
-}
-
-.flow-result > div {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
-}
-
-.flow-arrow {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: var(--font-size-xxl);
+.field-label {
+  display: block;
+  margin-bottom: var(--spacing-xs);
   color: var(--primary-color);
-  margin: var(--spacing-md) 0;
+  font-weight: var(--font-weight-semibold);
 }
 
-/* Responsive design */
+.multiline {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.factor-section {
+  margin-top: var(--spacing-lg);
+}
+
 @media (max-width: 768px) {
   .flow-detail {
     padding: var(--spacing-md);
   }
-  
-  .flow-title {
-    font-size: var(--font-size-xl);
-  }
-  
-  .flow-meta {
-    flex-direction: column;
-    gap: var(--spacing-sm);
-  }
-  
-  .flow-item {
-    flex-direction: column;
-  }
-  
-  .flow-number {
-    width: 50px;
-    height: 50px;
-    font-size: var(--font-size-lg);
+
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
